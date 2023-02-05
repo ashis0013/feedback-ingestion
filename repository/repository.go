@@ -5,7 +5,9 @@ import (
 )
 
 type Repository interface {
-	Init()
-	AddRecord(record *models.Feedback)
-	GetRecords(filter *models.QueryFilter) []*models.Feedback
+	AddRecord(record []*models.Feedback) error
+	GetRecords(filter *models.QueryFilter) (*models.GetFeedbacksResponse, error)
+	AddTenant(tenantName string, tags []string) error
+	FetchTags() ([]string, error)
+	AddSource(sourceName string, metadata string) error
 }

@@ -4,22 +4,27 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/ashis0013/feedback-ingestion/models"
+	. "github.com/ashis0013/gollections"
+	"github.com/google/uuid"
 	_ "github.com/lib/pq"
 
 	"github.com/jmoiron/sqlx"
 )
 
 const (
-	host = "localhost"
-	port = 5432
+	host  = "localhost"
+	port  = 5432
+	delim = ","
 )
 
 type PostgresRepository struct {
 	db             *sqlx.DB
 	dataSourceName string
+	sourceCache    map[string][]string
 }
 
 func NewPostgresRepository() *PostgresRepository {
@@ -28,10 +33,12 @@ func NewPostgresRepository() *PostgresRepository {
 		dataSourceName: fmt.Sprintf(
 			"host=%s port=%d user=%s password=%s dbname=%s sslmode=disable",
 			host, port, os.Getenv("PG_USER"), os.Getenv("PASS"), os.Getenv("DB_NAME")),
+		sourceCache: make(map[string][]string),
 	}
 }
 
 func (r *PostgresRepository) Init() {
+	go r.cacheClearRoutine()
 	var err error
 	r.db, err = sqlx.Connect("postgres", r.dataSourceName)
 
@@ -41,6 +48,90 @@ func (r *PostgresRepository) Init() {
 		return
 	}
 	r.createTables()
+}
+
+func (r *PostgresRepository) Terminate() {
+	if r.db != nil {
+		r.db.Close()
+	}
+}
+
+func (r *PostgresRepository) AddRecord(records []*models.Feedback) error {
+	for _, record := range records {
+		record.RecordId = uuid.New().String()
+		record.CreatedOn = time.Now()
+		err := transactExcec(r.db, func(tx *sqlx.Tx) error {
+			_, err := tx.NamedExec(insertRecord, record)
+			return err
+		})
+		if err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (r *PostgresRepository) GetRecords(filter *models.QueryFilter) (*models.GetFeedbacksResponse, error) {
+	q := filter.BuildSelectquery()
+	feedbacks := []*models.Feedback{}
+	err := transactQuery(r.db, &feedbacks, func(tx *sqlx.Tx) (*sqlx.Rows, error) {
+		args := filter.GetQueryArgs()
+		if len(args) == 0 {
+			return tx.Queryx(q)
+		}
+		return tx.Queryx(q, args...)
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	r.getSourceDataCached(filter.SourceId)
+	response := new(models.GetFeedbacksResponse)
+	response.Feedbacks = Map(feedbacks, func(it *models.Feedback) *models.FeedbackResponse {
+		return it.ToFeedbackResponse(r.sourceCache)
+	})
+	return response, nil
+}
+
+func (r *PostgresRepository) AddTenant(tenantName string, tags []string) error {
+	tenant := &models.TenantRecord{
+		TenantId:   uuid.New().String(),
+		TenantName: tenantName,
+		Tags:       strings.Join(tags, delim),
+	}
+
+	return transactExcec(r.db, func(tx *sqlx.Tx) error {
+		_, err := tx.NamedExec(insertTenant, tenant)
+		return err
+	})
+}
+
+func (r *PostgresRepository) FetchTags() ([]string, error) {
+	tenants := []*models.TenantRecord{}
+	err := transactQuery(r.db, &tenants, func(tx *sqlx.Tx) (*sqlx.Rows, error) {
+		return tx.Queryx(selectTenants)
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	tags := Fold(tenants, []string{}, func(t *models.TenantRecord, res []string) []string {
+		return append(res, strings.Split(t.Tags, delim)...)
+	})
+	return tags, nil
+}
+
+func (r *PostgresRepository) AddSource(sourceName string, metadata string) error {
+	source := &models.SourceRecord{
+		SourceId:       uuid.New().String(),
+		SourceName:     sourceName,
+		SourceMetadata: metadata,
+	}
+
+	return transactExcec(r.db, func(tx *sqlx.Tx) error {
+		_, err := tx.NamedExec(insertSource, source)
+		return err
+	})
 }
 
 func (r *PostgresRepository) createTables() {
@@ -59,73 +150,30 @@ func (r *PostgresRepository) createTables() {
 	})
 }
 
-func (r *PostgresRepository) Terminate() {
-	if r.db != nil {
-		r.db.Close()
-	}
-}
-
-func (r *PostgresRepository) AddRecord(record *models.Feedback) {
-	if r.db == nil {
-		log.Fatalln("Cannot connect to db")
+func (r *PostgresRepository) getSourceDataCached(sourceId string) {
+	_, sourceExists := r.sourceCache[sourceId]
+	if len(r.sourceCache) != 0 && (sourceId == "" || sourceExists) {
 		return
 	}
-
-	record.CreatedOn = time.Now()
-	transactExcec(r.db, func(tx *sqlx.Tx) error {
-		_, err := tx.NamedExec(insertRecord, record)
-		return err
+	sources := []*models.SourceRecord{}
+	transactQuery(r.db, &sources, func(tx *sqlx.Tx) (*sqlx.Rows, error) {
+		return tx.Queryx(selectSources)
 	})
+
+	for _, source := range sources {
+		r.sourceCache[source.SourceId] = []string{source.SourceName, source.SourceMetadata}
+	}
 }
 
-func (r *PostgresRepository) GetRecords(filter *models.QueryFilter) []*models.Feedback {
-	if r.db == nil {
-		log.Fatalln("Cannot connect to db")
-		return []*models.Feedback{}
+func (r *PostgresRepository) cacheClearRoutine() {
+	if r == nil {
+		return
 	}
-
-	q := filter.BuildSelectquery()
-	feedbacks := []*models.Feedback{}
-	transactQuery(r.db, &feedbacks, func(tx *sqlx.Tx) (*sqlx.Rows, error) {
-		args := getQueryArgs(filter)
-		if len(args) == 0 {
-			return tx.Queryx(q)
+	for {
+		if r == nil {
+			break
 		}
-		return tx.Queryx(q, args...)
-	})
-	for _, f := range feedbacks {
-		println(f.RecordId)
-	}
-	return feedbacks
-}
-
-func getQueryArgs(filter *models.QueryFilter) []any {
-	args := []any{}
-	if filter.TenantId != "" {
-		args = append(args, filter.TenantId)
-	}
-	if filter.SourceId != "" {
-		args = append(args, filter.SourceId)
-	}
-	if filter.StartTime != nil {
-		args = append(args, filter.StartTime.Format("2006-01-02 15:04:05"))
-	}
-	if filter.EndTime != nil {
-		args = append(args, filter.EndTime.Format("2006-01-02 15:04:05"))
-	}
-	return args
-}
-
-func transformRecord(record *models.Feedback) []interface{} {
-	return []interface{}{
-		record.RecordId,
-		record.SourceId,
-		record.TenantId,
-		record.PersonName,
-		record.PersonEmail,
-		record.FeedbackType,
-		record.FeedbackContent,
-		record.RecordLang,
-		record.AdditionalData,
+		r.sourceCache = make(map[string][]string)
+		time.Sleep(time.Second * 10)
 	}
 }
