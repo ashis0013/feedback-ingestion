@@ -55,7 +55,7 @@ func (s *Server) handlePostTenant(c *fiber.Ctx) error {
 
 func (s *Server) route() {
 	s.app.Post("/feedback", s.handlePostFeedback)
-	s.app.Get("/bruh", s.handleGetFeedback)
+	s.app.Get("/feedback", s.handleGetFeedback)
 	s.app.Post("/tenant", s.handlePostTenant)
 }
 
@@ -76,6 +76,6 @@ func main() {
 	repository.Init()
 	defer repository.Terminate()
 
-	server := NewServer(service.NewFeedbackIngestionService(repository, []cron.IngestionModule{}))
+	server := NewServer(service.NewFeedbackIngestionService(repository, cron.InitModules(repository)))
 	server.Start()
 }

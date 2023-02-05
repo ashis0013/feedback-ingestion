@@ -106,7 +106,7 @@ func (r *PostgresRepository) AddTenant(tenantName string, tags []string) error {
 	})
 }
 
-func (r *PostgresRepository) FetchTags() ([]string, error) {
+func (r *PostgresRepository) FetchTags() (map[string]string, error) {
 	tenants := []*models.TenantRecord{}
 	err := transactQuery(r.db, &tenants, func(tx *sqlx.Tx) (*sqlx.Rows, error) {
 		return tx.Queryx(selectTenants)
@@ -115,23 +115,46 @@ func (r *PostgresRepository) FetchTags() ([]string, error) {
 		return nil, err
 	}
 
-	tags := Fold(tenants, []string{}, func(t *models.TenantRecord, res []string) []string {
-		return append(res, strings.Split(t.Tags, delim)...)
+	tags := make(map[string]string)
+	ForEach(tenants, func(t *models.TenantRecord) {
+		ForEach(strings.Split(t.Tags, delim), func(tag string) {
+			tags[tag] = t.TenantId
+		})
 	})
 	return tags, nil
 }
 
-func (r *PostgresRepository) AddSource(sourceName string, metadata string) error {
+func (r *PostgresRepository) AddSource(sourceName string, metadata string) (string, error) {
+	id := uuid.New().String()
 	source := &models.SourceRecord{
-		SourceId:       uuid.New().String(),
+		SourceId:       id,
 		SourceName:     sourceName,
 		SourceMetadata: metadata,
 	}
 
-	return transactExcec(r.db, func(tx *sqlx.Tx) error {
+	err := transactExcec(r.db, func(tx *sqlx.Tx) error {
 		_, err := tx.NamedExec(insertSource, source)
 		return err
 	})
+	if err != nil {
+		return "", err
+	}
+	return id, nil
+}
+
+func (r *PostgresRepository) GetSources() (map[string]string, error) {
+	sources := []*models.SourceRecord{}
+	err := transactQuery(r.db, &sources, func(tx *sqlx.Tx) (*sqlx.Rows, error) {
+		return tx.Queryx(selectSources)
+	})
+	if err != nil {
+		return nil, err
+	}
+	sourceMap := make(map[string]string)
+	ForEach(sources, func(source *models.SourceRecord) {
+		sourceMap[source.SourceName] = source.SourceId
+	})
+	return sourceMap, nil
 }
 
 func (r *PostgresRepository) createTables() {

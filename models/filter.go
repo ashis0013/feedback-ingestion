@@ -64,7 +64,6 @@ func (f *QueryFilter) IsInvalid() bool {
 		return f.StartTime != ""
 	}
 	if _, err := strconv.ParseInt(f.EndTime, 10, 64); err != nil {
-		fmt.Println("sss")
 		return f.EndTime != ""
 	}
 	return false

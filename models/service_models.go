@@ -16,7 +16,7 @@ type FeedbackRequest struct {
 }
 
 type GetFeedbacksResponse struct {
-	Feedbacks []*FeedbackResponse `json:"feebnacks"`
+	Feedbacks []*FeedbackResponse `json:"feedbacks"`
 }
 
 type FeedbackResponse struct {
