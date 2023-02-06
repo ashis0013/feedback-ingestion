@@ -15,10 +15,13 @@ type FeedbackIngestionService struct {
 }
 
 func NewFeedbackIngestionService(repository repository.Repository, modules []cron.IngestionModule) *FeedbackIngestionService {
-	return &FeedbackIngestionService{
+    service := &FeedbackIngestionService{
 		repo:              repository,
 		ingestion_modules: modules,
 	}
+
+    ForEach(modules, func(it cron.IngestionModule) {service.fireCron(it)})
+    return service
 }
 
 func (s *FeedbackIngestionService) AppendIngestionModule(module cron.IngestionModule) {
