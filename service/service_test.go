@@ -39,5 +39,5 @@ func NewMockAssertVariables() *MockAssertVariables {
 
 func TestGollections(t *testing.T) {
 	gomega.RegisterFailHandler(ginkgo.Fail)
-	ginkgo.RunSpecs(t, "Gollections Test Suite")
+	ginkgo.RunSpecs(t, "Service Test Suite")
 }
