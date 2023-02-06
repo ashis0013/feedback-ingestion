@@ -23,7 +23,7 @@ func InitModules(repo repository.Repository) []IngestionModule {
 		log.Fatalln(err)
 	}
 	crons := []IngestionModule{
-		newDiscourseIngestor(repo, sources["Discourse"]),
+		NewDiscourseIngestor(repo, &CronHttpClient{}, sources["Discourse"], time.Hour * 24),
 	}
 
 	ForEach(crons, func(cron IngestionModule) {

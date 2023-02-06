@@ -3,9 +3,7 @@ package cron
 import (
 	"encoding/json"
 	"fmt"
-	"io/ioutil"
 	"log"
-	"net/http"
 	"strings"
 	"time"
 
@@ -15,21 +13,23 @@ import (
 )
 
 type DiscourseIngestor struct {
-	sourceId      string
+	SourceId      string
 	sleepDuration time.Duration
 	batchSize     int
 	maxFetch      int
 	repository    repository.Repository
+    httpClient HttpClient
 	tags          map[string]string
 }
 
-func newDiscourseIngestor(repo repository.Repository, id string) *DiscourseIngestor {
+func NewDiscourseIngestor(repo repository.Repository, client HttpClient, id string, sleppTime time.Duration) *DiscourseIngestor {
 	instance := &DiscourseIngestor{
-		sourceId:      id,
-		sleepDuration: time.Hour * 24,
+		SourceId:      id,
+		sleepDuration: sleppTime,
 		batchSize:     2,
 		maxFetch:      10,
 		repository:    repo,
+        httpClient: client,
 		tags:          make(map[string]string),
 	}
 	instance.repositoryRoutine()
@@ -68,7 +68,7 @@ func (di *DiscourseIngestor) GetMetadata() string {
 }
 
 func (di *DiscourseIngestor) SetSourceId(id string) {
-	di.sourceId = id
+	di.SourceId = id
 }
 
 func (di *DiscourseIngestor) repositoryRoutine() {
@@ -94,7 +94,7 @@ func (di *DiscourseIngestor) fetchData(pageFrom int, pageTo int) []*models.Feedb
 	posts := []*Item{}
 	validPosts := make(map[int][]string)
 	for page := pageFrom; page < pageTo; page++ {
-		body, err := GetApi(getUrl(page))
+		body, err := di.httpClient.Get(getUrl(page))
 		if err != nil {
 			continue
 		}
@@ -104,7 +104,7 @@ func (di *DiscourseIngestor) fetchData(pageFrom int, pageTo int) []*models.Feedb
 			continue
 		}
 		ForEach(respStruct.Posts, func(it Item) {
-			body, err = GetApi(getPostUrl(it.TopicId, it.Id))
+			body, err = di.httpClient.Get(getPostUrl(it.TopicId, it.Id))
 			var postStruct postResp
 			json.Unmarshal(body, &postStruct)
 			if len(postStruct.PostStream.Posts) == 0 {
@@ -129,22 +129,10 @@ func (di *DiscourseIngestor) fetchData(pageFrom int, pageTo int) []*models.Feedb
 	return Map(posts, func(it *Item) *models.Feedback {
 		feedback := it.toFeedback()
 		feedback.TenantId = validPosts[it.Id][0]
-		feedback.SourceId = di.sourceId
+		feedback.SourceId = di.SourceId
 		feedback.FeedbackContent = validPosts[it.Id][1]
 		return feedback
 	})
-}
-
-func GetApi(url string) ([]byte, error) {
-	response, err := http.Get(url)
-	if err != nil {
-		return nil, err
-	}
-	body, err := ioutil.ReadAll(response.Body)
-	if err != nil {
-		return nil, err
-	}
-	return body, nil
 }
 
 func getUrl(page int) string {
