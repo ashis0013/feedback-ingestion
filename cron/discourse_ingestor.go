@@ -18,7 +18,7 @@ type DiscourseIngestor struct {
 	batchSize     int
 	maxFetch      int
 	repository    repository.Repository
-    httpClient HttpClient
+	httpClient    HttpClient
 	tags          map[string]string
 }
 
@@ -29,7 +29,7 @@ func NewDiscourseIngestor(repo repository.Repository, client HttpClient, id stri
 		batchSize:     2,
 		maxFetch:      10,
 		repository:    repo,
-        httpClient: client,
+		httpClient:    client,
 		tags:          make(map[string]string),
 	}
 	instance.repositoryRoutine()
